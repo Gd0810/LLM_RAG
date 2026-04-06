@@ -29,7 +29,7 @@ Answer:"""
 )
 
 # 4. LLM
-llm = OllamaLLM(model="llama3.2")
+llm = OllamaLLM(model="phi3:mini", num_predict=200)
 
 # 5. Build chain using modern LCEL syntax
 def format_docs(docs):
