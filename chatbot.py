@@ -1,7 +1,8 @@
 from langchain_ollama import OllamaEmbeddings, OllamaLLM
 from langchain_community.vectorstores import Chroma
-from langchain.chains import RetrievalQA
-from langchain.prompts import PromptTemplate
+from langchain_core.prompts import PromptTemplate
+from langchain_core.runnables import RunnablePassthrough
+from langchain_core.output_parsers import StrOutputParser
 
 # 1. Load the persisted vector store
 embeddings = OllamaEmbeddings(model="nomic-embed-text")
@@ -10,11 +11,11 @@ vectorstore = Chroma(
     embedding_function=embeddings
 )
 
-# 2. Set up the retriever (fetch top 3 most relevant chunks)
+# 2. Set up the retriever
 retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
 
-# 3. Define a custom RAG prompt
-prompt_template = PromptTemplate(
+# 3. Prompt template
+prompt = PromptTemplate(
     input_variables=["context", "question"],
     template="""You are a helpful assistant. Use ONLY the context below to answer.
 If the answer isn't in the context, say "I don't know based on the provided documents."
@@ -27,16 +28,18 @@ Question: {question}
 Answer:"""
 )
 
-# 4. Connect to Llama 3.2 via Ollama
+# 4. LLM
 llm = OllamaLLM(model="llama3.2")
 
-# 5. Build the RAG chain
-rag_chain = RetrievalQA.from_chain_type(
-    llm=llm,
-    chain_type="stuff",          # "stuff" = put all chunks into one prompt
-    retriever=retriever,
-    chain_type_kwargs={"prompt": prompt_template},
-    return_source_documents=True
+# 5. Build chain using modern LCEL syntax
+def format_docs(docs):
+    return "\n\n".join(doc.page_content for doc in docs)
+
+rag_chain = (
+    {"context": retriever | format_docs, "question": RunnablePassthrough()}
+    | prompt
+    | llm
+    | StrOutputParser()
 )
 
 # 6. Chat loop
@@ -48,13 +51,5 @@ while True:
     if not query:
         continue
 
-    result = rag_chain.invoke({"query": query})
-    print(f"\nBot: {result['result']}")
-
-    # Optionally show which chunks were used
-    print("\n[Sources]")
-    for doc in result["source_documents"]:
-        src = doc.metadata.get("source", "unknown")
-        page = doc.metadata.get("page", "?")
-        print(f"  - {src}, page {page}")
-    print()
+    answer = rag_chain.invoke(query)
+    print(f"\nBot: {answer}\n")
